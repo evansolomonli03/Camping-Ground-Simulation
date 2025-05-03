@@ -1,92 +1,73 @@
 import random
 from OpenGL.GL import *
 
-
 class WeatherSystem:
     def __init__(self):
-        self.rain_particles = []
-        self.fog_density = 0.0
-        self.lightning_active = False
-        self.lightning_intensity = 0.0
-        self.lightning_duration = 0
-        self.lightning_cooldown = 0
-        self.rain_enabled = False
-        self.lightning_enabled = False  # Add this line
+        self.rain_particles     = []
+        self.fog_density        = 0.0
+        self.lightning_active   = False
+        self.lightning_intensity= 0.0
+        self.lightning_duration = 0.0
+        self.lightning_cooldown = 0.0
+        self.rain_enabled       = False
+        self.lightning_enabled  = False
 
-    def update(self, delta_time):
-        # Update rain particles
-        self.update_rain(delta_time)
-
-        # Only update lightning if rain is enabled and lightning is enabled
-        if self.rain_enabled and self.lightning_enabled:
-            self.update_lightning(delta_time)
-        else:
-            # Make sure lightning is off when disabled
-            self.lightning_active = False
-            self.lightning_intensity = 0.0
-
-    def update_rain(self, delta_time):
-        # Only process rain if it's enabled
-        if hasattr(self, 'rain_enabled') and self.rain_enabled:
-            # Add new rain particles
+    def update(self, dt):
+        # Rain
+        if self.rain_enabled:
             if len(self.rain_particles) < 1000:
                 for _ in range(10):
-                    x = random.uniform(-50, 50)
-                    y = random.uniform(20, 25)
-                    z = random.uniform(-50, 50)
-                    speed = random.uniform(9, 12)
-                    self.rain_particles.append([x, y, z, speed])
+                    x, y, z = random.uniform(-20,20), random.uniform(10,20), random.uniform(-20,20)
+                    speed = random.uniform(9,12)
+                    self.rain_particles.append([x,y,z,speed])
+            new = []
+            for p in self.rain_particles:
+                p[1] -= p[3] * dt
+                if p[1] > 0:
+                    new.append(p)
+            self.rain_particles = new
 
-            # Update existing particles
-            new_particles = []
-            for particle in self.rain_particles:
-                particle[1] -= particle[3] * delta_time
-                if particle[1] > 0:
-                    new_particles.append(particle)
-            self.rain_particles = new_particles
-
-    def update_lightning(self, delta_time):
-        if self.lightning_active:
-            self.lightning_duration -= delta_time
-            if self.lightning_duration <= 0:
-                self.lightning_active = False
-                self.lightning_intensity = 0.0
-                self.lightning_cooldown = random.uniform(5, 15)
+        # Lightning
+        if self.rain_enabled and self.lightning_enabled:
+            if self.lightning_active:
+                self.lightning_duration -= dt
+                if self.lightning_duration <= 0:
+                    self.lightning_active    = False
+                    self.lightning_intensity = 0.0
+                    self.lightning_cooldown  = random.uniform(5,15)
+            else:
+                self.lightning_cooldown -= dt
+                if self.lightning_cooldown <= 0 and random.random() < 0.1:
+                    self.lightning_active    = True
+                    self.lightning_intensity = random.uniform(0.5,1.0)
+                    self.lightning_duration  = random.uniform(0.05,0.2)
         else:
-            self.lightning_cooldown -= delta_time
-            if self.lightning_cooldown <= 0 and random.random() < 0.1:
-                self.lightning_active = True
-                self.lightning_intensity = random.uniform(0.5, 1.0)
-                self.lightning_duration = random.uniform(0.05, 0.2)
+            self.lightning_active    = False
+            self.lightning_intensity = 0.0
 
     def render(self):
-        # Render fog
+        # Fog
         if self.fog_density > 0:
             glFogi(GL_FOG_MODE, GL_EXP2)
-            glFogfv(GL_FOG_COLOR, (0.5, 0.5, 0.5, 1.0))
+            glFogfv(GL_FOG_COLOR, (0.5,0.5,0.5,1.0))
             glFogf(GL_FOG_DENSITY, self.fog_density)
             glEnable(GL_FOG)
         else:
             glDisable(GL_FOG)
 
-        # Render rain - thicker and more visible
-        glLineWidth(2.0)  # Thicker lines for rain
+        # Rain
+        glLineWidth(2.0)
         glBegin(GL_LINES)
-        glColor3f(0.7, 0.8, 1.0)  # Lighter blue for rain
-        for particle in self.rain_particles:
-            glVertex3f(particle[0], particle[1], particle[2])
-            glVertex3f(particle[0], particle[1] - 1.0, particle[2])  # Longer rain drops
+        glColor3f(0.7,0.8,1.0)
+        for p in self.rain_particles:
+            glVertex3f(p[0], p[1], p[2])
+            glVertex3f(p[0], p[1]-1.0, p[2])
         glEnd()
-        glLineWidth(1.0)  # Reset line width
+        glLineWidth(1.0)
 
-        # Apply lightning effect
+        # Lightning flicker
         if self.lightning_active:
-            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (
-                self.lightning_intensity,
-                self.lightning_intensity,
-                self.lightning_intensity,
-                1.0
-            ))
+            amb = (self.lightning_intensity,) * 3 + (1.0,)
+            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb)
         else:
-            # Reset to normal ambient lighting
-            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (0.2, 0.2, 0.2, 1.0))
+            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (0.2,0.2,0.2,1.0))
