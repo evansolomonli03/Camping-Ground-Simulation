@@ -1,77 +1,49 @@
 import math
-import pygame
 from pyglm import glm
-from OpenGL.GL import *
-
+from pygame.locals import *
 
 class Camera:
     def __init__(self):
-        self.position = glm.vec3(0.0, 2.0, 10.0)
-        self.front = glm.vec3(0.0, 0.0, -1.0)
-        self.up = glm.vec3(0.0, 1.0, 0.0)
-        self.right = glm.vec3(1.0, 0.0, 0.0)
+        self.position    = glm.vec3(0.0, 2.0, 10.0)
+        self.front       = glm.vec3(0.0, 0.0, -1.0)
+        self.up          = glm.vec3(0.0, 1.0,  0.0)
+        self.yaw         = -90.0
+        self.pitch       =   0.0
+        self.move_speed  = 5.0
+        self.sensitivity = 0.05
+        self._update_vectors()
 
-        self.yaw = -90.0
-        self.pitch = 0.0
-        self.move_speed = 5.0
-        self.mouse_sensitivity = 0.05  # Reduced from 0.1 for smoother movement
+    def _update_vectors(self):
+        fx = math.cos(math.radians(self.yaw)) * math.cos(math.radians(self.pitch))
+        fy = math.sin(math.radians(self.pitch))
+        fz = math.sin(math.radians(self.yaw)) * math.cos(math.radians(self.pitch))
+        self.front = glm.normalize(glm.vec3(fx, fy, fz))
+        right      = glm.cross(self.front, glm.vec3(0,1,0))
+        self.up    = glm.normalize(glm.cross(right, self.front))
 
-        self.update_vectors()
+    def process_keyboard(self, keys, dt):
+        v = self.move_speed * dt
+        if keys[K_w]:       self.position += self.front * v
+        if keys[K_s]:       self.position -= self.front * v
+        if keys[K_a]:       self.position -= glm.cross(self.front, self.up) * v
+        if keys[K_d]:       self.position += glm.cross(self.front, self.up) * v
+        if keys[K_SPACE]:   self.position.y += v
+        if keys[K_LSHIFT]:  self.position.y -= v
 
-    def update_vectors(self):
-        # Calculate new front vector
-        self.front.x = math.cos(math.radians(self.yaw)) * math.cos(math.radians(self.pitch))
-        self.front.y = math.sin(math.radians(self.pitch))
-        self.front.z = math.sin(math.radians(self.yaw)) * math.cos(math.radians(self.pitch))
-        self.front = glm.normalize(self.front)
+    def process_mouse(self, dx, dy):
+        if abs(dx)>100 or abs(dy)>100: return
+        self.yaw   += dx * self.sensitivity
+        self.pitch -= dy * self.sensitivity
+        self.pitch  = max(-89.0, min(89.0, self.pitch))
+        self._update_vectors()
 
-        # Recalculate right and up vectors
-        self.right = glm.normalize(glm.cross(self.front, glm.vec3(0.0, 1.0, 0.0)))
-        self.up = glm.normalize(glm.cross(self.right, self.front))
-
-    def process_keyboard(self, keys, delta_time):
-        velocity = self.move_speed * delta_time
-
-        if keys[pygame.K_w]:
-            self.position += self.front * velocity
-        if keys[pygame.K_s]:
-            self.position -= self.front * velocity
-        if keys[pygame.K_a]:
-            self.position -= self.right * velocity
-        if keys[pygame.K_d]:
-            self.position += self.right * velocity
-        if keys[pygame.K_SPACE]:
-            self.position.y += velocity
-        if keys[pygame.K_LSHIFT]:
-            self.position.y -= velocity
-
-    def process_mouse(self, x_offset, y_offset):
-        # Make sure we're getting reasonable values for mouse movement
-        if abs(x_offset) > 100 or abs(y_offset) > 100:
-            return  # Skip processing if movement is too large
-
-        self.yaw += x_offset * self.mouse_sensitivity
-        self.pitch -= y_offset * self.mouse_sensitivity
-
-        # Constrain pitch
-        if self.pitch > 89.0:
-            self.pitch = 89.0
-        if self.pitch < -89.0:
-            self.pitch = -89.0
-
-        self.update_vectors()
-
-    def get_view_matrix(self):
-        return glm.lookAt(self.position, self.position + self.front, self.up)
+    def zoom(self, amount):
+        self.position += self.front * amount
 
     def apply(self):
-        view_matrix = self.get_view_matrix()
-        # Convert to a flat list that OpenGL can use
-        matrix_data = []
-        for i in range(4):
-            for j in range(4):
-                matrix_data.append(view_matrix[i][j])
-
+        view = glm.lookAt(self.position, self.position + self.front, self.up)
+        data = [view[i][j] for i in range(4) for j in range(4)]
+        from OpenGL.GL import glMatrixMode, glLoadIdentity, glMultMatrixf, GL_MODELVIEW
         glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
-        glMultMatrixf(matrix_data)
+        glMultMatrixf(data)
