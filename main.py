@@ -1,5 +1,3 @@
-# camping_sim.py
-
 import pygame
 from pygame.locals import *
 from OpenGL.GL import *
@@ -9,237 +7,218 @@ import random
 import math
 from pyglm import glm
 
-SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
-GROUND_EXTENT = 50.0
-GROUND_Y      = 0.0
-
-TENT_BASE   = 1.0
-TENT_HEIGHT = 1.5
-
-PIT_CENTER   = (-1.2, -1.7)
-PIT_RADIUS   = 0.5
-N_STONES     = 13
-STONE_RADIUS = 0.12
-
-FLAME_HEIGHT = 0.6
-FLAME_BASE   = 0.1
-FLAME_POS    = [
-    (PIT_CENTER[0] + 0.2, PIT_CENTER[1]),
-    (PIT_CENTER[0] - 0.2, PIT_CENTER[1]),
-    (PIT_CENTER[0],       PIT_CENTER[1] + 0.2),
-]
-
-SMOKE_RISE_SPEED  = 1.0
-SMOKE_LIFETIME    = 3.0
-SMOKE_BASE_HEIGHT = GROUND_Y + 0.05
-SMOKE_BASE_SPREAD = 0.1
-
-NUM_TREES        = 1000
-TREE_TENT_BUFFER = 1.0
-TREE_PIT_BUFFER  = 0.5
-SPAWN_RADIUS     = 60.0
-
-ROT_SENS    = 0.3
-ZOOM_AMOUNT = 1.0
+s_width, s_height = 800, 600
+plot_l = 50.0
+plot_h = 0.0
 
 class WeatherSystem:
     def __init__(self):
-        self.rain_particles     = []
-        self.fog_density        = 0.0
-        self.lightning_active   = False
-        self.lightning_intensity= 0.0
-        self.lightning_duration = 0.0
-        self.lightning_cooldown = 0.0
-        self.rain_enabled       = False
-        self.lightning_enabled  = False
-
+        self.rp  = []
+        self.fd  = 0.0
+        self.rain  = False
+        self.lightning = False
+        self.la = False
+        self.li = 0.0
+        self.lt = 0.0
+        self.lc = random.uniform(5,15)
     def update(self, dt):
-        # Rain
-        if self.rain_enabled:
-            if len(self.rain_particles) < 1000:
+        if self.rain:
+            if len(self.rp) < 1000:
                 for _ in range(10):
-                    x, y, z = random.uniform(-20,20), random.uniform(10,20), random.uniform(-20,20)
-                    speed = random.uniform(9,12)
-                    self.rain_particles.append([x,y,z,speed])
-            new = []
-            for p in self.rain_particles:
-                p[1] -= p[3] * dt
-                if p[1] > 0:
-                    new.append(p)
-            self.rain_particles = new
-
-        if self.rain_enabled and self.lightning_enabled:
-            if self.lightning_active:
-                self.lightning_duration -= dt
-                if self.lightning_duration <= 0:
-                    self.lightning_active   = False
-                    self.lightning_intensity= 0.0
-                    self.lightning_cooldown = random.uniform(5,15)
-            else:
-                self.lightning_cooldown -= dt
-                if self.lightning_cooldown <= 0 and random.random() < 0.1:
-                    self.lightning_active   = True
-                    self.lightning_intensity= random.uniform(0.5,1.0)
-                    self.lightning_duration = random.uniform(0.05,0.2)
+                    x = random.uniform(-20,20)
+                    y = random.uniform(10,20)
+                    z = random.uniform(-20,20)
+                    sp = random.uniform(9,12)
+                    self.rp.append([x,y,z,sp])
+            self.rp = [
+                [x, y - sp*dt, z, sp]
+                for x,y,z,sp in self.rp
+                if (y - sp*dt) > 0
+            ]
         else:
-            self.lightning_active    = False
-            self.lightning_intensity = 0.0
-
+            self.rp.clear()
+        if self.lightning and self.rain:
+            if self.la:
+                self.lt -= dt
+                if self.lt <= 0:
+                    self.la = False
+                    self.li = 0.0
+                    self.lc = random.uniform(5,15)
+            else:
+                self.lc -= dt
+                if self.lc <= 0 and random.random() < 0.1:
+                    self.la = True
+                    self.li = random.uniform(0.5,1.0)
+                    self.lt = random.uniform(0.05,0.2)
+        else:
+            self.la = False
+            self.li = 0.0
+            self.lc = random.uniform(5,15)
     def render(self):
-        if self.fog_density > 0:
+        if self.fd > 0:
             glFogi(GL_FOG_MODE, GL_EXP2)
             glFogfv(GL_FOG_COLOR, (0.5,0.5,0.5,1.0))
-            glFogf(GL_FOG_DENSITY, self.fog_density)
+            glFogf(GL_FOG_DENSITY, self.fd)
             glEnable(GL_FOG)
         else:
             glDisable(GL_FOG)
-
         glLineWidth(2.0)
         glBegin(GL_LINES)
         glColor3f(0.7,0.8,1.0)
-        for p in self.rain_particles:
-            glVertex3f(p[0], p[1], p[2])
-            glVertex3f(p[0], p[1] - 1.0, p[2])
+        for x,y,z,_ in self.rp:
+            glVertex3f(x, y, z)
+            glVertex3f(x, y-1, z)
         glEnd()
         glLineWidth(1.0)
-
-        if self.lightning_active:
-            amb = (self.lightning_intensity,) * 3 + (1.0,)
-            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, amb)
+        if self.la:
+            ambient = self.li
         else:
-            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (0.2,0.2,0.2,1.0))
+            ambient = 0.2
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, (ambient, ambient, ambient, 1.0))
 
 class LSystem:
     def __init__(self, axiom, rules, iterations):
-        self.axiom      = axiom
-        self.rules      = rules
+        self.axiom = axiom
+        self.rules = rules
         self.iterations = iterations
-
     def generate(self):
-        res = self.axiom
+        result = self.axiom
         for _ in range(self.iterations):
-            res = "".join(self.rules.get(c, c) for c in res)
-        return res
+            new_result = ""
+            for char in result:
+                if char in self.rules:
+                    new_result += self.rules[char]
+                else:
+                    new_result += char
+            result = new_result
+        return result
+
+tree_count = 1000
+tent_buffer = 1.0
+pit_buffer = 0.5
+sp_rad = 60.0
 
 class Tree:
     def __init__(self, position, scale, rotation, params):
         self.position = position
-        self.scale    = scale
+        self.scale = scale
         self.rotation = rotation
-        ax = params.get("axiom", "F")
-        rules = params.get("rules", {"F":"FF+[+F-F-F]-[-F+F+F]"})
-        it = params.get("iterations", 3)
-        self.lsys = LSystem(ax, rules, it)
-        self.dl   = self._compile()
-
-    def _compile(self):
+        axiom = params.get("axiom", "F")
+        rules = params.get("rules", {"F": "FF+[+F-F-F]-[-F+F+F]"})
+        iterations = params.get("iterations", 3)
+        self.lsys = LSystem(axiom, rules, iterations)
+        self.display_list = self._build_display_list()
+    def _build_display_list(self):
         dl = glGenLists(1)
         glNewList(dl, GL_COMPILE)
         glPushMatrix()
-        glTranslatef(*self.position)
-        glRotatef(self.rotation[1], 0, 1, 0)
-        glRotatef(-90, 1, 0, 0)
-        # Trunk
-        glColor3f(0.6,0.3,0.1)
+        glTranslatef(self.position[0], self.position[1], self.position[2])
+        glRotatef(self.rotation[1], 0, 1, 0)  
+        glRotatef(-90, 1, 0, 0)                
+        glColor3f(0.6, 0.3, 0.1)
         q = gluNewQuadric()
-        gluCylinder(q, 0.1*self.scale[0], 0.08*self.scale[0], 1.0*self.scale[1], 8, 4)
+        base_radius = 0.1 * self.scale[0]
+        top_radius = 0.08 * self.scale[0]
+        height_trunk = 1.0 * self.scale[1]
+        gluCylinder(q, base_radius, top_radius, height_trunk, 8, 4)
         gluDeleteQuadric(q)
-        # Foliage
-        glTranslatef(0, 0, 0.7*self.scale[1])
-        glColor3f(0.1,0.6,0.1)
+        glTranslatef(0, 0, 0.7 * self.scale[1])
+        glColor3f(0.1, 0.6, 0.1)
         q2 = gluNewQuadric()
-        gluCylinder(q2, 0.5*self.scale[0], 0.0, 1.5*self.scale[1], 10, 4)
+        base_foliage = 0.5 * self.scale[0]
+        height_foliage = 1.5 * self.scale[1]
+        gluCylinder(q2, base_foliage, 0.0, height_foliage, 10, 4)
         gluDeleteQuadric(q2)
         glPopMatrix()
         glEndList()
         return dl
-
     def render(self):
-        glCallList(self.dl)
+        glCallList(self.display_list)
 
 class Terrain:
-    def __init__(self, size=GROUND_EXTENT):
+    def __init__(self, size=plot_l):
         self.size = size
-
     def render_ground(self):
-        glColor3f(0.3,0.5,0.2)
+        glColor3f(0.3, 0.5, 0.2)
+        half = self.size
         glBegin(GL_QUADS)
-        glNormal3f(0,1,0)
-        s = self.size
-        glVertex3f(-s, GROUND_Y, -s)
-        glVertex3f(-s, GROUND_Y,  s)
-        glVertex3f( s, GROUND_Y,  s)
-        glVertex3f( s, GROUND_Y, -s)
+        glNormal3f(0, 1, 0)
+        glVertex3f(-half, plot_h, -half)
+        glVertex3f(-half, plot_h,  half)
+        glVertex3f( half, plot_h,  half)
+        glVertex3f( half, plot_h, -half)
         glEnd()
 
 class DayNightCycle:
     def __init__(self):
-        self.time     = 0.25
-        self.sun_size = 5.0
-        self.sun_dl   = self._make_sun()
-        self.sun_pos  = [0.0, 0.0, 0.0]
-
-    def _make_sun(self):
-        dl = glGenLists(1)
-        glNewList(dl, GL_COMPILE)
-        q = gluNewQuadric()
-        gluSphere(q, self.sun_size, 20, 20)
-        gluDeleteQuadric(q)
+        self.t = 0.25
+        self.size = 5.0
+        self.slist = self.make_sun()
+        self.spos = [0.0, 0.0, 0.0]
+    def make_sun(self):
+        sun_id = glGenLists(1)
+        glNewList(sun_id, GL_COMPILE)
+        quad = gluNewQuadric()
+        gluSphere(quad, self.size, 20, 20)
+        gluDeleteQuadric(quad)
         glEndList()
-        return dl
-
+        return sun_id
     def update(self, mode):
-        self.time = 0.25 if mode == "day" else 0.75
-        ang = self.time * 2 * math.pi
-        d   = 80.0
-        sy  = math.sin(ang)
-        cy  = math.cos(ang)
-        self.sun_pos = [0.0, max(0.0, sy)*d, -cy*d]
-
+        if mode == "day":
+            self.t = 0.25
+        else:
+            self.t = 0.75
+        angle = self.t * 2 * math.pi
+        radius = 80.0
+        height = max(0.0, math.sin(angle)) * radius
+        horiz = -math.cos(angle) * radius
+        self.spos = [0.0, height, horiz]
     def get_light_dir(self):
-        ang = self.time * 2 * math.pi
-        y   = math.sin(ang)
-        return (0.0, max(0.1, y), -math.cos(ang), 0.0)
-
+        angle = self.t * 2 * math.pi
+        y = max(0.1, math.sin(angle))
+        return (0.0, y, -math.cos(angle), 0.0)
     def apply(self):
-        diff_col = (1.0,1.0,1.0,1.0) if self.time < 0.5 else (0.05,0.05,0.1,1.0)
-        f = max(0.0, math.sin(self.time * 2 * math.pi))
-        diff = tuple(c * f for c in diff_col)
+        if self.t < 0.5:
+            base_color = (1.0, 1.0, 1.0, 1.0)
+        else:
+            base_color = (0.05, 0.05, 0.1, 1.0)
+        fade = max(0.0, math.sin(self.t * 2 * math.pi))
+        diffuse = tuple(c * fade for c in base_color)
         glLightfv(GL_LIGHT0, GL_POSITION, self.get_light_dir())
-        glLightfv(GL_LIGHT0, GL_DIFFUSE,  diff)
-        glLightfv(GL_LIGHT0, GL_SPECULAR, diff)
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, diff)
-
+        glLightfv(GL_LIGHT0, GL_DIFFUSE,  diffuse)
+        glLightfv(GL_LIGHT0, GL_SPECULAR, diffuse)
+        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, diffuse)
     def render_sun(self):
-        if self.sun_pos[1] <= 0:
+        if self.spos[1] <= 0:
             return
         glDisable(GL_LIGHTING)
-        glColor3f(1.0,1.0,0.8)
+        glColor3f(1.0, 1.0, 0.8)
         glPushMatrix()
-        glTranslatef(*self.sun_pos)
-        glCallList(self.sun_dl)
+        glTranslatef(self.spos[0], self.spos[1], self.spos[2])
+        glCallList(self.slist)
         glPopMatrix()
         glEnable(GL_LIGHTING)
 
+rotation_sense = 0.3
+zoom = 1.0
+
 class Camera:
     def __init__(self):
-        self.position    = glm.vec3(0.0, 2.0, 10.0)
-        self.front       = glm.vec3(0.0, 0.0, -1.0)
-        self.up          = glm.vec3(0.0, 1.0,  0.0)
-        self.yaw         = -90.0
-        self.pitch       =   0.0
-        self.move_speed  = 5.0
+        self.position = glm.vec3(0.0, 2.0, 10.0)
+        self.front = glm.vec3(0.0, 0.0, -1.0)
+        self.up = glm.vec3(0.0, 1.0, 0.0)
+        self.yaw = -90.0
+        self.pitch = 0.0
+        self.move_speed = 5.0
         self.sensitivity = 0.05
         self._update_vectors()
-
     def _update_vectors(self):
         fx = math.cos(math.radians(self.yaw)) * math.cos(math.radians(self.pitch))
         fy = math.sin(math.radians(self.pitch))
         fz = math.sin(math.radians(self.yaw)) * math.cos(math.radians(self.pitch))
         self.front = glm.normalize(glm.vec3(fx, fy, fz))
-        right      = glm.cross(self.front, glm.vec3(0,1,0))
-        self.up    = glm.normalize(glm.cross(right, self.front))
-
+        right = glm.cross(self.front, glm.vec3(0,1,0))
+        self.up = glm.normalize(glm.cross(right, self.front))
     def process_keyboard(self, keys, dt):
         v = self.move_speed * dt
         if keys[K_w]:
@@ -254,18 +233,15 @@ class Camera:
             self.position.y += v
         if keys[K_LSHIFT]:
             self.position.y -= v
-
     def process_mouse(self, dx, dy):
         if abs(dx) > 100 or abs(dy) > 100:
             return
-        self.yaw   += dx * self.sensitivity
+        self.yaw += dx * self.sensitivity
         self.pitch -= dy * self.sensitivity
-        self.pitch  = max(-89.0, min(89.0, self.pitch))
+        self.pitch = max(-89.0, min(89.0, self.pitch))
         self._update_vectors()
-
     def zoom(self, amt):
         self.position += self.front * amt
-
     def apply(self):
         view = glm.lookAt(self.position, self.position + self.front, self.up)
         data = [view[i][j] for i in range(4) for j in range(4)]
@@ -273,121 +249,151 @@ class Camera:
         glLoadIdentity()
         glMultMatrixf(data)
 
+t_base = 1.0
+t_height = 1.5
+
 def draw_tent():
-    glColor3f(0.0,0.0,0.0)
-    hs   = TENT_BASE
-    apex = (0.0, TENT_HEIGHT, 0.0)
-    base = [(-hs,0,-hs),(hs,0,-hs),(hs,0,hs),(-hs,0,hs)]
+    hs = t_base
+    apex = (0.0, t_height, 0.0)
+    corners = [(-hs, 0, -hs), ( hs, 0, -hs), ( hs, 0,  hs), (-hs, 0,  hs), ]
+    glColor3f(0.0, 0.0, 0.0)
     glBegin(GL_TRIANGLES)
-    for p1, p2 in zip(base, base[1:]+base[:1]):
+    for i in range(4):
         glVertex3f(*apex)
-        glVertex3f(*p1)
-        glVertex3f(*p2)
+        glVertex3f(*corners[i])
+        glVertex3f(*corners[(i + 1) % 4])
     glEnd()
-    glColor3f(1.0,1.0,1.0)
+    glColor3f(1.0, 1.0, 1.0)
     glLineWidth(4)
     glBegin(GL_LINES)
-    glVertex3f(0.0, TENT_HEIGHT, 0.0)
+    glVertex3f(0.0, t_height, 0.0)
     glVertex3f(0.0, 0.0, -hs)
     glEnd()
     glLineWidth(1)
 
+cf_cent = (-1.2, -1.7)
+cf_rad = 0.5
+s_amount = 13
+s_rad = 0.12
+
 def draw_stones():
     quad = gluNewQuadric()
-    glColor3f(0.6,0.6,0.6)
-    for angle in np.linspace(0, 2*math.pi, N_STONES, endpoint=False):
-        x = PIT_CENTER[0] + PIT_RADIUS * math.cos(angle)
-        z = PIT_CENTER[1] + PIT_RADIUS * math.sin(angle)
+    glColor3f(0.6, 0.6, 0.6)
+    for i in range(s_amount):
+        angle = 2 * math.pi * i / s_amount
+        x = cf_cent[0] + cf_rad * math.cos(angle)
+        z = cf_cent[1] + cf_rad * math.sin(angle)
+        y = plot_h + s_rad
         glPushMatrix()
-        glTranslatef(x, GROUND_Y + STONE_RADIUS, z)
-        gluSphere(quad, STONE_RADIUS, 16, 16)
+        glTranslatef(x, y, z)
+        gluSphere(quad, s_rad, 16, 16)
         glPopMatrix()
     gluDeleteQuadric(quad)
+
+f_height = 0.6
+f_base = 0.1
+f_pos = [ (cf_cent[0] + 0.2, cf_cent[1]), (cf_cent[0] - 0.2, cf_cent[1]), (cf_cent[0], cf_cent[1] + 0.2), ]
 
 def draw_flames():
     quad = gluNewQuadric()
-    glColor3f(1.0,0.5,0.0)
-    for x, z in FLAME_POS:
+    glColor3f(1.0, 0.5, 0.0)
+    for fx, fz in f_pos:
         glPushMatrix()
-        glTranslatef(x, GROUND_Y, z)
+        glTranslatef(fx, plot_h, fz)
         glRotatef(-90, 1, 0, 0)
-        gluCylinder(quad, FLAME_BASE, 0.0, FLAME_HEIGHT, 16, 1)
+        gluCylinder(quad, f_base, 0.0, f_height, 16, 1)
         glPopMatrix()
     gluDeleteQuadric(quad)
 
-# Smoke globals
-smoke_particles = []
-quad_smoke      = None
-smoke_timer     = 0.0
+s_rs = 1.0
+s_life = 3.0
+s_bh = plot_h + 0.05
+s_bs = 0.1
+
+smoke_p = []
+q_smoke = None
+smoke_t = 0.0
 
 def spawn_smoke():
     for _ in range(4):
-        smoke_particles.append({
-            'x': PIT_CENTER[0] + random.uniform(-SMOKE_BASE_SPREAD, SMOKE_BASE_SPREAD),
-            'y': SMOKE_BASE_HEIGHT,
-            'z': PIT_CENTER[1] + random.uniform(-SMOKE_BASE_SPREAD, SMOKE_BASE_SPREAD),
+        x = cf_cent[0] + random.uniform(-s_bs, s_bs)
+        y = s_bh
+        z = cf_cent[1] + random.uniform(-s_bs, s_bs)
+        smoke_p.append({
+            'x': x,
+            'y': y,
+            'z': z,
             'age': 0.0
         })
 
 def update_smoke(dt):
-    global smoke_particles
-    smoke_particles = [
-        {'x': p['x'], 'y': p['y'] + dt * SMOKE_RISE_SPEED,'z': p['z'],'age': p['age'] + dt}
-        for p in smoke_particles if p['age'] + dt < SMOKE_LIFETIME
-    ]
+    new_list = []
+    for p in smoke_p:
+        p['age'] += dt
+        if p['age'] < s_life:
+            p['y'] += s_rs * dt
+            new_list.append(p)
+    smoke_p[:] = new_list
 
 def draw_smoke():
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-    for p in smoke_particles:
-        alpha = max(0.0, 1.0 - p['age']/SMOKE_LIFETIME)
-        size  = 0.2 + 0.15 * p['age']
-        glColor4f(0.8,0.8,0.8,alpha)
+    for puff in smoke_p:
+        alpha = 1.0 - (puff['age'] / s_life)
+        if alpha < 0.0:
+            alpha = 0.0
+        size = 0.2 + 0.15 * puff['age']
+        glColor4f(0.8, 0.8, 0.8, alpha)
         glPushMatrix()
-        glTranslatef(p['x'], p['y'], p['z'])
-        gluSphere(quad_smoke, size, 8, 8)
+        glTranslatef(puff['x'], puff['y'], puff['z'])
+        gluSphere(q_smoke, size, 8, 8)
         glPopMatrix()
     glDisable(GL_BLEND)
 
 def main():
-    global quad_smoke, smoke_timer
+    global q_smoke, smoke_t
 
     pygame.init()
-    pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), DOUBLEBUF | OPENGL)
-    pygame.mouse.set_visible(False)
+    pygame.display.set_mode((s_width, s_height), DOUBLEBUF | OPENGL)
+    pygame.mouse.set_visible(True)
     clock = pygame.time.Clock()
 
     glClearColor(0.5,0.7,1.0,1.0)
     glEnable(GL_DEPTH_TEST)
-    glEnable(GL_LIGHTING); glEnable(GL_LIGHT0); glEnable(GL_LIGHT1)
-    glEnable(GL_COLOR_MATERIAL); glEnable(GL_NORMALIZE)
-    glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-    glMatrixMode(GL_PROJECTION); gluPerspective(45, SCREEN_WIDTH/SCREEN_HEIGHT, 0.1, 100.0)
+    glEnable(GL_LIGHTING); 
+    glEnable(GL_LIGHT0); 
+    glEnable(GL_LIGHT1)
+    glEnable(GL_COLOR_MATERIAL); 
+    glEnable(GL_NORMALIZE)
+    glEnable(GL_BLEND); 
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glMatrixMode(GL_PROJECTION); 
+    gluPerspective(45, s_width/s_height, 0.1, 100.0)
     glMatrixMode(GL_MODELVIEW)
 
-    cam     = Camera()
-    day     = DayNightCycle()
+    cam = Camera()
+    day = DayNightCycle()
     weather = WeatherSystem()
-    terra   = Terrain(GROUND_EXTENT)
+    terra = Terrain(plot_l)
 
     trees = []
-    while len(trees) < NUM_TREES:
-        x = random.uniform(-SPAWN_RADIUS, SPAWN_RADIUS)
-        z = random.uniform(-SPAWN_RADIUS, SPAWN_RADIUS)
-        if abs(x) < TENT_BASE + TREE_TENT_BUFFER and abs(z) < TENT_BASE + TREE_TENT_BUFFER:
+    while len(trees) < tree_count:
+        x = random.uniform(-sp_rad, sp_rad)
+        z = random.uniform(-sp_rad, sp_rad)
+        if abs(x) < t_base + tent_buffer and abs(z) < t_base + tent_buffer:
             continue
-        if (x - PIT_CENTER[0])**2 + (z - PIT_CENTER[1])**2 < (PIT_RADIUS + TREE_PIT_BUFFER)**2:
+        if (x - cf_cent[0])**2 + (z - cf_cent[1])**2 < (cf_rad + pit_buffer)**2:
             continue
         trees.append(Tree((x,0,z), (1, random.uniform(2,4)), (0, random.uniform(0,360)), {}))
 
-    quad_smoke  = gluNewQuadric()
-    smoke_timer = 0.0
-    is_day      = True
+    q_smoke = gluNewQuadric()
+    smoke_t = 0.0
+    is_day = True
 
     running = True
     while running:
         dt = clock.tick(60) / 1000.0
-        smoke_timer += dt
+        smoke_t += dt
 
         for ev in pygame.event.get():
             if ev.type == QUIT:
@@ -400,26 +406,26 @@ def main():
                 elif ev.key == K_n:
                     is_day = False
                 elif ev.key == K_r:
-                    weather.rain_enabled = not weather.rain_enabled
-                    weather.rain_particles = [] if not weather.rain_enabled else [
+                    weather.rain = not weather.rain
+                    weather.rp= [] if not weather.rain else [
                         [random.uniform(-20,20), random.uniform(10,20), random.uniform(-20,20), random.uniform(9,12)]
                         for _ in range(10)
                     ]
                 elif ev.key == K_f:
-                    weather.fog_density = 0.02 if weather.fog_density == 0 else 0.0
+                    weather.fd = 0.02 if weather.fd == 0 else 0.0
                 elif ev.key == K_l:
-                    weather.lightning_enabled = not weather.lightning_enabled
-                    if weather.lightning_enabled and not weather.rain_enabled:
-                        weather.rain_enabled = True
-                        weather.rain_particles = [
+                    weather.lightning = not weather.lightning
+                    if weather.lightning and not weather.rain:
+                        weather.rain = True
+                        weather.rp= [
                             [random.uniform(-20,20), random.uniform(10,20), random.uniform(-20,20), random.uniform(9,12)]
                             for _ in range(10)
                         ]
             elif ev.type == MOUSEBUTTONDOWN:
                 if ev.button == 4:
-                    cam.zoom(ZOOM_AMOUNT)
+                    cam.zoom(zoom)
                 elif ev.button == 5:
-                    cam.zoom(-ZOOM_AMOUNT)
+                    cam.zoom(-zoom)
             elif ev.type == MOUSEMOTION and pygame.mouse.get_pressed()[0]:
                 dx, dy = ev.rel
                 cam.process_mouse(dx, dy)
@@ -431,24 +437,23 @@ def main():
 
         if not is_day:
             glEnable(GL_LIGHT1)
-            fire_x, fire_z = PIT_CENTER
-            fire_y = GROUND_Y + 0.2
+            fire_x, fire_z = cf_cent
+            fire_y = plot_h + 0.2
 
             glLightfv(GL_LIGHT1, GL_POSITION, (fire_x, fire_y, fire_z, 1.0))
 
-            glLightfv(GL_LIGHT1, GL_AMBIENT,  (0.4, 0.2, 0.1, 1.0))
-            glLightfv(GL_LIGHT1, GL_DIFFUSE,  (1.0, 0.8, 0.4, 1.0))
+            glLightfv(GL_LIGHT1, GL_AMBIENT, (0.4, 0.2, 0.1, 1.0))
+            glLightfv(GL_LIGHT1, GL_DIFFUSE, (1.0, 0.8, 0.4, 1.0))
             glLightfv(GL_LIGHT1, GL_SPECULAR, (1.0, 0.8, 0.4, 1.0))
-            glLightf(GL_LIGHT1, GL_CONSTANT_ATTENUATION,  0.1)
-            glLightf(GL_LIGHT1, GL_LINEAR_ATTENUATION,    0.01)
+            glLightf(GL_LIGHT1, GL_CONSTANT_ATTENUATION, 0.1)
+            glLightf(GL_LIGHT1, GL_LINEAR_ATTENUATION, 0.01)
             glLightf(GL_LIGHT1, GL_QUADRATIC_ATTENUATION, 0.002)
         else:
             glDisable(GL_LIGHT1)
 
-
-        if smoke_timer > 0.1:
+        if smoke_t > 0.1:
             spawn_smoke()
-            smoke_timer = 0.0
+            smoke_t = 0.0
         update_smoke(dt)
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
@@ -465,7 +470,7 @@ def main():
         draw_smoke()
         pygame.display.flip()
 
-    gluDeleteQuadric(quad_smoke)
+    gluDeleteQuadric(q_smoke)
     pygame.quit()
 
 if __name__ == "__main__":
